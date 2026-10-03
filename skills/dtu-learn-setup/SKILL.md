@@ -29,7 +29,7 @@ Install dtu-learn and run the first setup for the user. Run the commands yoursel
 
 3. **Install dtu-learn.** Ask first. Then run:
    ```bash
-   uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-sync
+   uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-mcp
    ```
    If `dtu-learn` is not found after this, run `uv tool update-shell` and open a new terminal.
 

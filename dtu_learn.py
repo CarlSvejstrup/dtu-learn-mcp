@@ -5,7 +5,7 @@
 """Legacy entry point: `uv run dtu_learn.py <command>` from a checkout of this repo.
 
 Same as the `dtu-learn` command. Data stays in this folder (DTU_LEARN_HOME = repo) unless you set DTU_LEARN_HOME.
-New installs: `uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-sync`, then `dtu-learn setup`.
+New installs: `uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-mcp`, then `dtu-learn setup`.
 """
 
 import os

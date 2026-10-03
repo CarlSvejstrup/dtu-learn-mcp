@@ -20,7 +20,7 @@ You need a DTU account and Google Chrome (or Edge).
 **Claude Code (recommended)**
 
 ```
-/plugin marketplace add CarlSvejstrup/dtu-learn-sync
+/plugin marketplace add CarlSvejstrup/dtu-learn-mcp
 /plugin install dtu-learn@dtu-learn
 ```
 
@@ -31,11 +31,11 @@ You type your password and MFA in the browser yourself.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh          # uv, if you do not have it (Windows: see uv docs)
-uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-sync
+uv tool install git+https://github.com/CarlSvejstrup/dtu-learn-mcp
 dtu-learn setup                                          # login, first download, connects your AI apps
 ```
 
-Restart your AI app. To add the skills too: `npx skills add CarlSvejstrup/dtu-learn-sync`.
+Restart your AI app. To add the skills too: `npx skills add CarlSvejstrup/dtu-learn-mcp`.
 
 ## Use it
 
@@ -174,7 +174,7 @@ Sources: [DTU IT security policy](https://student.dtu.dk/en/studieregler/IT-sikk
 ## Development
 
 ```bash
-git clone https://github.com/CarlSvejstrup/dtu-learn-sync && cd dtu-learn-sync
+git clone https://github.com/CarlSvejstrup/dtu-learn-mcp && cd dtu-learn-mcp
 uv tool install --editable .
 uv run --group dev pytest -q        # offline tests: no network, browser or scheduler
 claude plugin validate . --strict

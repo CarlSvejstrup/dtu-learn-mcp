@@ -19,7 +19,7 @@ dependencies = [
 dtu-learn = "dtulearn.cli:main"
 
 [project.urls]
-Repository = "https://github.com/CarlSvejstrup/dtu-learn-sync"
+Repository = "https://github.com/CarlSvejstrup/dtu-learn-mcp"
 
 [build-system]
 requires = ["hatchling"]
