@@ -20,8 +20,8 @@ EXAMPLES = [
 
 
 def _ask(question: str, default: bool, assume_yes: bool) -> bool:
-    if assume_yes:
-        return True
+    if assume_yes:  # --yes takes the default answer, so opt-in extras (the schedule) stay off
+        return default
     if not sys.stdin.isatty():
         return default
     hint = "[Y/n]" if default else "[y/N]"
@@ -105,12 +105,13 @@ def cmd_setup(args) -> None:
                 except Exception as e:  # noqa: BLE001
                     print(f"  {c.name}: could not connect ({e}).")
 
-    _step(6, "Auto-refresh")
+    _step(6, "Optional: daily auto-refresh")
     if args.no_schedule:
         print("  Skipped (--no-schedule).")
     elif schedule.installed():
         print("  Already on: " + schedule.status())
-    elif _ask("  Refresh once a day in the background, with a notification when something is new?", True, y):
+    elif getattr(args, "schedule", False) or _ask("  You can always refresh by asking your AI assistant (or `dtu-learn scrape --current`).\n"
+              "  Also refresh automatically every morning, with a notification when something is new?", False, y):
         try:
             print("  " + schedule.install())
         except Exception as e:  # noqa: BLE001

@@ -52,3 +52,9 @@ def test_version(capsys):
         cli.main(["--version"])
     assert e.value.code == 0
     assert capsys.readouterr().out.strip() == f"dtu-learn {__version__}"
+
+
+def test_setup_yes_keeps_optional_schedule_off():
+    from dtulearn import wizard
+    assert wizard._ask("Connect Claude Code?", True, assume_yes=True) is True
+    assert wizard._ask("Refresh automatically every morning?", False, assume_yes=True) is False

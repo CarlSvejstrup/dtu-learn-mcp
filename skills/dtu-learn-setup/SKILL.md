@@ -37,12 +37,12 @@ Install dtu-learn and run the first setup for the user. Run the commands yoursel
    ```bash
    dtu-learn setup --yes
    ```
-   `--yes` answers yes to every question, so it works without a terminal prompt. To leave out parts, add `--no-clients` (do not connect AI apps) or `--no-schedule` (no auto-refresh). The setup:
+   `--yes` takes the default answer to every question, so it works without a terminal prompt. Add `--no-clients` to skip connecting AI apps. The setup:
    - checks for Chrome or Edge (it installs Playwright Chromium if neither is found)
    - opens the DTU login and waits until the user finishes MFA
    - shows this semester's courses and downloads them
    - connects Claude Code, Claude Desktop and Cursor if they are installed. It skips Claude Code when the dtu-learn plugin is enabled, because the plugin connects it.
-   - turns on auto-refresh every other day
+   - leaves the optional daily auto-refresh off. The user refreshes by asking you (MCP `refresh`). Only if the user wants automatic morning refreshes with notifications: run `dtu-learn schedule install` (or add `--schedule` to the setup command).
    - prints example questions
 
    If the user prefers to answer each question, ask them to run `dtu-learn setup` in their own terminal and tell you when it is done.

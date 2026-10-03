@@ -553,6 +553,9 @@ async def refresh(course: str | None = None) -> str:
     """Download the latest from DTU Learn (this semester, or one course) and return what changed. Takes up to a few minutes.
     course: id, course number or name part; omit for all of this semester's courses."""
     args = ["--course", str(one(course).ou)] if course else ["--current"]
+    from .paths import SYNC_CONFIG
+    if SYNC_CONFIG.exists():  # same result as the optional schedule: notes folders stay current too
+        args.append("--sync")
     code, output = await _run_cli(["scrape", *args, "--out", str(OUT)], REFRESH_TIMEOUT)
     if code is None:
         return f"Refresh timed out after {REFRESH_TIMEOUT // 60} min and was stopped. Try one course at a time."

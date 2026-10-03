@@ -22,9 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True, metavar="command")
 
     st = sub.add_parser("setup", help="guided first run: login, courses, download, connect AI apps, schedule")
-    st.add_argument("--yes", "-y", action="store_true", help="answer yes to every question")
+    st.add_argument("--yes", "-y", action="store_true", help="accept the default answer to every question (the optional schedule stays off)")
     st.add_argument("--no-clients", action="store_true", help="do not connect AI apps")
     st.add_argument("--no-schedule", action="store_true", help="do not offer the auto-refresh schedule")
+    st.add_argument("--schedule", action="store_true", help="also install the optional daily auto-refresh")
 
     lg = sub.add_parser("login", help="open a browser and log in to DTU Learn (DTU login + MFA)")
     lg.add_argument("--timeout", type=int, default=300, help="seconds to wait for you to finish (default 300)")
