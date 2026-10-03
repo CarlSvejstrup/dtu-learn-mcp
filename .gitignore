@@ -1,0 +1,15 @@
+.profile/
+state.json
+out/
+__pycache__/
+.venv/
+scrape_all.log
+*.log
+sync.json
+.last_auto
+auto.log
+work/
+STATUS.md
+.refresh.lock
+auto.log.1
+hooks/

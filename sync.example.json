@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy to ~/.dtu-learn/sync.json. Key = org unit id (dtu-learn courses --current), value = a folder of yours. A path ending in <course>/material/learn also gets <course>/announcements.md and deadlines in <course>/backlog.md. Files whose content already exists under the folder's parent are skipped.",
+  "326319": "~/Documents/DTU/02132 Computer systems/material/learn",
+  "326353": "~/Documents/DTU/02456 Deep learning/material/learn"
+}

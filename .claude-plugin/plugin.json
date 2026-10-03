@@ -1,0 +1,23 @@
+{
+  "name": "dtu-learn",
+  "displayName": "DTU Learn",
+  "version": "0.2.0",
+  "description": "Ask Claude about your own DTU Learn courses: deadlines, announcements, slides, assignments, grades and what is new. Local MCP server plus four skills.",
+  "author": {
+    "name": "Carl Schmidt-Svejstrup",
+    "url": "https://github.com/CarlSvejstrup"
+  },
+  "homepage": "https://github.com/CarlSvejstrup/dtu-learn-sync",
+  "repository": "https://github.com/CarlSvejstrup/dtu-learn-sync",
+  "keywords": [
+    "dtu",
+    "dtu-learn",
+    "brightspace",
+    "d2l",
+    "university",
+    "study",
+    "deadlines",
+    "mcp"
+  ],
+  "license": "MIT"
+}

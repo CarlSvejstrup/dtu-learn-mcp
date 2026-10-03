@@ -1,0 +1,15 @@
+{
+  "name": "dtu-learn",
+  "description": "DTU Learn for Claude Code: your own courses, deadlines and slides, on your own machine.",
+  "owner": {
+    "name": "Carl Schmidt-Svejstrup",
+    "url": "https://github.com/CarlSvejstrup"
+  },
+  "plugins": [
+    {
+      "name": "dtu-learn",
+      "source": "./",
+      "description": "Ask Claude about your own DTU Learn courses: deadlines, announcements, slides, assignments, grades and what is new."
+    }
+  ]
+}
