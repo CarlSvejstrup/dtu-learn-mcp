@@ -31,7 +31,8 @@ COURSE_OFFERING = 3
 SEMESTER_WINDOW = timedelta(days=120)
 WORKERS = 3  # DTU IT policy: "must not unnecessarily burden DTU's systems"; 3 parallel requests is gentle
 URL_RE = re.compile(r"""https?://[^\s"'<>()\]\[]+|(?<=href=["'])/[^"']+""")
-AUTO_EVERY = timedelta(hours=12)  # every morning; blocks a second refresh the same day
+AUTO_EVERY = timedelta(hours=12)  # kept for older callers; the schedule now refreshes once per calendar day
+NOTIFY_EVERY = timedelta(hours=6)  # repeat the same warning (login expired, failure) at most this often
 MAX_NEW_LECTURES = 4   # more new lecture folders than this in one run = a re-download, not new teaching: baseline them
 HOOK_LIMIT = 2         # queued lectures the after-refresh hook may process per auto run (passed as --limit)
 MAX_LOG_BYTES = 2_000_000
@@ -63,8 +64,34 @@ class NoBrowser(Exception):
 BROWSER_CHANNELS = ("chrome", "msedge", None)  # None = Playwright's own Chromium
 
 
+def clear_stale_profile_lock() -> bool:
+    """A browser killed mid-start (e.g. the Mac fell asleep) leaves SingletonLock -> '<host>-<pid>'.
+    Chrome then waits for that dead instance. Remove the lock files when the pid is gone."""
+    lock = PROFILE / "SingletonLock"
+    try:
+        target = os.readlink(lock)
+    except OSError:
+        return False
+    pid = target.rsplit("-", 1)[-1]
+    if pid.isdigit():
+        try:
+            os.kill(int(pid), 0)
+            return False  # a live browser still uses the profile
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            return False
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        try:
+            (PROFILE / name).unlink()
+        except OSError:
+            pass
+    return True
+
+
 def open_context(pw, headless: bool) -> BrowserContext:
     ensure_home()
+    clear_stale_profile_lock()
     errors = []
     for channel in BROWSER_CHANNELS:
         try:
@@ -74,6 +101,9 @@ def open_context(pw, headless: bool) -> BrowserContext:
         except Exception as e:  # noqa: BLE001 - try the next browser
             errors.append(f"{channel or 'chromium'}: {str(e).splitlines()[0]}")
     else:
+        if any("Timeout" in e for e in errors):
+            raise NoBrowser("The browser did not start in time (the computer may have gone to sleep). "
+                            "It is tried again at the next check.\n" + "\n".join(errors))
         raise NoBrowser("No browser found. Install Google Chrome, or run: dtu-learn setup "
                         "(it can install Playwright Chromium).\n" + "\n".join(errors))
     # Chrome drops session cookies when it closes, so restore the saved ones.
@@ -739,8 +769,44 @@ def scrape_args(**kw) -> argparse.Namespace:
 
 
 def _next_check(now: datetime) -> datetime:
-    t = now.replace(hour=7, minute=30, second=0, microsecond=0)
-    return t if t > now else t + timedelta(days=1)
+    t = now.replace(minute=30, second=0, microsecond=0)
+    t = t if t > now else t + timedelta(hours=1)
+    if t.hour < 7:
+        t = t.replace(hour=7)
+    elif t.hour > 22:
+        t = (t + timedelta(days=1)).replace(hour=7)
+    return t
+
+
+def _due(now: datetime) -> bool:
+    """Refresh once per calendar day: due when the last successful refresh was before today."""
+    if not LAST_AUTO.exists():
+        return True
+    return datetime.fromisoformat(LAST_AUTO.read_text().strip()).date() < now.date()
+
+
+def mac_dark_wake() -> bool:
+    """True during a macOS DarkWake (maintenance wake with no display): a browser cannot start then."""
+    if platform.system() != "Darwin":
+        return False
+    try:
+        out = subprocess.run(["pmset", "-g", "systemstate"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    caps = next((l for l in out.splitlines() if "Capabilities" in l), "")
+    return bool(caps) and "Graphics" not in caps
+
+
+def notify_once(kind: str, title: str, text: str) -> None:
+    """Hourly checks must not repeat the same warning every hour."""
+    stamp = HOME / f".notified_{kind}"
+    try:
+        if stamp.exists() and datetime.now() - datetime.fromisoformat(stamp.read_text().strip()) < NOTIFY_EVERY:
+            return
+        stamp.write_text(datetime.now().isoformat(timespec="seconds"))
+    except (OSError, ValueError):
+        pass
+    notify(title, text)
 
 
 def write_status(result: str, detail: str = "", items: list[str] | None = None) -> None:
@@ -748,10 +814,17 @@ def write_status(result: str, detail: str = "", items: list[str] | None = None) 
     Read it (or ask Claude to) to see where things stand."""
     now = datetime.now()
     last = datetime.fromisoformat(LAST_AUTO.read_text().strip()) if LAST_AUTO.exists() else None
-    due = (last + AUTO_EVERY) if last else now
     nxt = _next_check(now)
-    while nxt < due:
-        nxt += timedelta(days=1)
+    if last and last.date() >= nxt.date():  # already refreshed today: next refresh is tomorrow's first check
+        nxt = (nxt + timedelta(days=1)).replace(hour=7)
+    items_file = HOME / ".last_items.json"
+    if items is not None:
+        try:
+            items_file.write_text(json.dumps(items, ensure_ascii=False))
+        except OSError:
+            pass
+    elif items_file.exists():
+        items = json.loads(items_file.read_text())
     qpath = OUT / "new_lectures.json"
     q = json.loads(qpath.read_text()) if qpath.exists() else []
     active = [e for e in q if e.get("status") != "baseline"]
@@ -760,7 +833,7 @@ def write_status(result: str, detail: str = "", items: list[str] | None = None) 
         f"- **Checked:** {now:%Y-%m-%d %H:%M}",
         f"- **Result:** {result}" + (f" ({detail})" if detail else ""),
         f"- **Last successful refresh:** {last:%Y-%m-%d %H:%M}" if last else "- **Last successful refresh:** never",
-        f"- **Next refresh:** {nxt:%a %Y-%m-%d %H:%M} (daily check at 07:30, refresh when {AUTO_EVERY.total_seconds() / 3600:.0f} h have passed)",
+        f"- **Next refresh:** {nxt:%a %Y-%m-%d %H:%M} (checks every hour 07:30-22:30 while the computer is awake; refreshes once a day)",
         "- **Login needed:** " + ("YES: run `dtu-learn login`" if result.startswith("login expired")
                                   else "not checked (no refresh this time)" if result == "skipped" else "no"),
         "", "## New in the last refresh", "",
@@ -812,16 +885,21 @@ def _run_hook() -> None:
 
 
 def cmd_auto(args) -> None:
-    """Scheduled entry point: refresh + sync once a day, notify on news or expired login,
-    then run the optional after-refresh hook. Always leaves STATUS.md behind."""
+    """Scheduled entry point, run every hour 07:30-22:30. The first check of the day that finds the computer
+    awake refreshes + syncs; later checks skip. Notifies on news, expired login or failure (each warning at most
+    every 6 h), then runs the optional after-refresh hook. Always leaves STATUS.md behind."""
     _rotate_log()
-    if LAST_AUTO.exists() and not args.now:
+    now = datetime.now()
+    if not args.now and not _due(now):
         last = datetime.fromisoformat(LAST_AUTO.read_text().strip())
-        if datetime.now() - last < AUTO_EVERY:
-            log(f"{datetime.now():%Y-%m-%d %H:%M} skip: last run {last:%Y-%m-%d %H:%M}")
-            write_status("skipped", f"last refresh {last:%a %H:%M}, not due yet")
-            return
-    log(f"\n===== auto run {datetime.now():%Y-%m-%d %H:%M}")
+        log(f"{now:%Y-%m-%d %H:%M} skip: refreshed today at {last:%H:%M}")
+        write_status("skipped", f"already refreshed today at {last:%H:%M}")
+        return
+    if mac_dark_wake():
+        log(f"{now:%Y-%m-%d %H:%M} skip: the Mac is asleep (DarkWake); trying again at the next check")
+        write_status("skipped", "the Mac was asleep; the next check tries again")
+        return
+    log(f"\n===== auto run {now:%Y-%m-%d %H:%M}")
     try:
         report = cmd_scrape(scrape_args())
     except RefreshLocked as e:
@@ -829,17 +907,19 @@ def cmd_auto(args) -> None:
         write_status("skipped", str(e))
         return
     except SessionExpired as e:
-        notify("DTU Learn", "Login expired. Run: dtu-learn login (or ask your AI assistant to log you in)")
+        notify_once("login", "DTU Learn", "Login expired. Run: dtu-learn login (or ask your AI assistant to log you in)")
         log(f"session error: {e}")
         write_status("login expired", "no refresh until you log in; queued lectures still run")
         _run_hook()
         write_status("login expired", "no refresh until you log in; queued lectures still run")
         raise
     except Exception as e:
-        notify("DTU Learn", f"Refresh failed: {type(e).__name__}. See {AUTO_LOG}")
-        write_status("failed", f"{type(e).__name__}: {str(e)[:120]}")
+        notify_once("failed", "DTU Learn", f"Refresh failed: {type(e).__name__}. It retries at the next check.")
+        write_status("failed", f"{type(e).__name__}: {str(e).splitlines()[0][:140]}; retries at the next check")
         raise
     LAST_AUTO.write_text(datetime.now().isoformat(timespec="seconds"))
+    for kind in ("login", "failed"):  # a success clears the warning throttles
+        (HOME / f".notified_{kind}").unlink(missing_ok=True)
     items = [f"{name.split(',')[0]}: {i}" for name, lst in report.items() for i in lst]
     if items:
         notify(f"DTU Learn: {len(items)} new", "; ".join(items[:3]) + (" ..." if len(items) > 3 else ""))

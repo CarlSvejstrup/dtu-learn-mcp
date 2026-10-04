@@ -45,19 +45,19 @@ def test_linux_install_replaces_old_line(dl, exe, crontab):
     assert "your crontab" in msg and "08:30" in msg
     assert crontab.lines[:2] == ["MAILTO=me", "0 * * * * backup.sh"]
     [line] = marked(crontab.lines)
-    assert line == (f"30 8 * * * DTU_LEARN_HOME={dl.home} /opt/bin/dtu-learn auto "
+    assert line == (f"30 8-22 * * * DTU_LEARN_HOME={dl.home} /opt/bin/dtu-learn auto "
                     f">> {dl.paths.AUTO_LOG} 2>&1 {schedule.CRON_MARK}")
     assert crontab.writes[-1].endswith("\n")
     assert dl.home.is_dir()   # ensure_home ran, in the tmp home
 
     schedule.install(9)
-    assert len(marked(crontab.lines)) == 1 and marked(crontab.lines)[0].startswith("30 9 ")
+    assert len(marked(crontab.lines)) == 1 and marked(crontab.lines)[0].startswith("30 9-22 ")
     assert schedule.installed() is True
 
 
 def test_linux_install_without_existing_crontab(dl, exe, crontab):
     schedule.install()
-    assert len(crontab.lines) == 1 and crontab.lines[0].startswith("30 7 * * * ")
+    assert len(crontab.lines) == 1 and crontab.lines[0].startswith("30 7-22 * * * ")
 
 
 def test_linux_remove(dl, exe, crontab):
@@ -99,7 +99,7 @@ def test_darwin_install_writes_plist(dl, exe, launchd):
     data = plistlib.loads(plist.read_bytes())
     assert data["Label"] == schedule.LABEL
     assert data["ProgramArguments"] == paths.self_command() + ["auto"] == ["/opt/bin/dtu-learn", "auto"]
-    assert data["StartCalendarInterval"] == {"Hour": 6, "Minute": 30}
+    assert data["StartCalendarInterval"] == [{"Hour": h, "Minute": 30} for h in range(6, 23)]
     assert data["EnvironmentVariables"]["DTU_LEARN_HOME"] == str(dl.home)
     assert data["StandardOutPath"] == str(dl.paths.AUTO_LOG)
 

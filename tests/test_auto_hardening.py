@@ -75,6 +75,45 @@ def test_status_file(tmp_path, monkeypatch):
     assert "not checked" in (tmp_path / "STATUS.md").read_text()
 
 
-def test_next_check_is_0730():
+def test_next_check_is_hourly_0730_to_2230():
     assert core._next_check(datetime(2026, 10, 5, 6, 0)) == datetime(2026, 10, 5, 7, 30)
-    assert core._next_check(datetime(2026, 10, 5, 8, 0)) == datetime(2026, 10, 6, 7, 30)
+    assert core._next_check(datetime(2026, 10, 5, 8, 0)) == datetime(2026, 10, 5, 8, 30)
+    assert core._next_check(datetime(2026, 10, 5, 22, 45)) == datetime(2026, 10, 6, 7, 30)
+
+
+def test_due_once_per_calendar_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LAST_AUTO", tmp_path / ".last_auto")
+    assert core._due(datetime(2026, 10, 5, 7, 30))
+    core.LAST_AUTO.write_text("2026-10-05T07:31:00")
+    assert not core._due(datetime(2026, 10, 5, 19, 30))  # 12 h later, same day: no second refresh
+    assert core._due(datetime(2026, 10, 6, 7, 30))
+
+
+def test_dark_wake_detection(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(core.platform, "system", lambda: "Darwin")
+    for caps, expected in (("CPU Graphics Audio Network", False), ("CPU Network", True)):
+        out = f"Current System Capabilities are: {caps} \nCurrent Power State: 4\n"
+        monkeypatch.setattr(core.subprocess, "run",
+                            lambda *a, _o=out, **k: subprocess.CompletedProcess(a, 0, stdout=_o))
+        assert core.mac_dark_wake() is expected
+
+
+def test_stale_profile_lock_is_cleared(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(core, "PROFILE", tmp_path)
+    os.symlink("macbook-999999999", tmp_path / "SingletonLock")  # pid that does not exist
+    (tmp_path / "SingletonCookie").write_text("x")
+    assert core.clear_stale_profile_lock() is True
+    assert not (tmp_path / "SingletonLock").is_symlink() and not (tmp_path / "SingletonCookie").exists()
+    os.symlink(f"macbook-{os.getpid()}", tmp_path / "SingletonLock")  # live pid: keep it
+    assert core.clear_stale_profile_lock() is False and (tmp_path / "SingletonLock").is_symlink()
+
+
+def test_notify_once_throttles(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(core, "HOME", tmp_path)
+    monkeypatch.setattr(core, "notify", lambda t, x: sent.append(x))
+    core.notify_once("login", "DTU Learn", "Login expired")
+    core.notify_once("login", "DTU Learn", "Login expired")
+    assert sent == ["Login expired"]

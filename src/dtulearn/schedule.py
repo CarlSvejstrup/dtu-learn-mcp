@@ -1,6 +1,7 @@
-"""Run `dtu-learn auto` every day at a fixed hour: launchd (macOS), crontab (Linux), Task Scheduler (Windows).
+"""Run `dtu-learn auto` every hour from 07:30 to 22:30: launchd (macOS), crontab (Linux), Task Scheduler (Windows).
 
-`auto` itself decides whether 12 h have passed since the last refresh, so a missed or late morning still refreshes once.
+`auto` refreshes at the first check of the day that finds the computer awake and skips the rest, so a laptop
+that sleeps through 07:30 still refreshes once that day.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ LEGACY_LABELS = ("dk.svejstrup.dtu-learn",)
 PLIST_DIR = Path.home() / "Library/LaunchAgents"
 CRON_MARK = "# dtu-learn auto"
 WIN_TASK = "dtu-learn-auto"
+LAST_HOUR = 22  # last hourly check of the day (22:30)
 
 
 def _plist(label: str) -> Path:
@@ -40,7 +42,7 @@ def install(hour: int = 7) -> str:
 <plist version="1.0"><dict>
   <key>Label</key><string>{LABEL}</string>
   <key>ProgramArguments</key><array>{args}</array>
-  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>{hour}</integer><key>Minute</key><integer>30</integer></dict>
+  <key>StartCalendarInterval</key><array>{"".join(f"<dict><key>Hour</key><integer>{h}</integer><key>Minute</key><integer>30</integer></dict>" for h in range(hour, LAST_HOUR + 1))}</array>
   <key>StandardOutPath</key><string>{escape(str(AUTO_LOG))}</string>
   <key>StandardErrorPath</key><string>{escape(str(AUTO_LOG))}</string>
   <key>EnvironmentVariables</key><dict>
@@ -52,18 +54,19 @@ def install(hour: int = 7) -> str:
         subprocess.run(["launchctl", "load", str(_plist(LABEL))], check=True)
         where = str(_plist(LABEL))
     elif system == "Linux":
-        line = (f"30 {hour} * * * DTU_LEARN_HOME={shlex.quote(str(HOME))} {shlex.join(cmd)} "
+        line = (f"30 {hour}-{LAST_HOUR} * * * DTU_LEARN_HOME={shlex.quote(str(HOME))} {shlex.join(cmd)} "
                 f">> {shlex.quote(str(AUTO_LOG))} 2>&1 {CRON_MARK}")
         _set_crontab([*_crontab_without_mark(), line])
         where = "your crontab"
     elif system == "Windows":
         tr = subprocess.list2cmdline(cmd)
-        subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", f"{hour:02d}:30", "/TN", WIN_TASK,
-                        "/TR", tr], check=True, capture_output=True)
+        subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", f"{hour:02d}:30", "/RI", "60",
+                        "/DU", f"{LAST_HOUR - hour:02d}:01", "/TN", WIN_TASK, "/TR", tr], check=True, capture_output=True)
         where = f"Task Scheduler task '{WIN_TASK}'"
     else:
         raise RuntimeError(f"Scheduling is not supported on {system}. Run `dtu-learn auto` yourself.")
-    return f"Installed in {where}: checks daily at {hour:02d}:30 and refreshes once a day."
+    return (f"Installed in {where}: checks every hour {hour:02d}:30-{LAST_HOUR}:30 and refreshes once a day, "
+            "at the first check that finds the computer awake.")
 
 
 def remove() -> str:

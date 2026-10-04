@@ -64,7 +64,8 @@ dtu-learn schedule status
 dtu-learn schedule remove
 ```
 
-It checks at 07:30 (or when the computer wakes) and refreshes at most once per 12 hours. After every check it
+It checks every hour from 07:30 to 22:30 and refreshes once a day, at the first check that finds the computer
+awake (a closed laptop's brief maintenance wake is skipped). After every check it
 writes `~/.dtu-learn/STATUS.md`: result, whether you must log in, next refresh and what was new. Ask your AI
 "what is the dtu-learn status?" to read it. When the login has expired you get a notification; run
 `dtu-learn login`.
