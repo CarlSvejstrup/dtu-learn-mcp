@@ -77,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     au = sub.add_parser("auto", help="what the schedule runs: refresh when 12 h have passed, then notify")
     au.add_argument("--now", action="store_true", help="ignore the 12 h check")
 
+    sub.add_parser("keepalive", help="what the schedule runs every hour: keep the saved DTU Learn session alive")
     sub.add_parser("mcp", help="run the MCP server over stdio (your AI app starts this)")
     return p
 
@@ -95,7 +96,7 @@ def main(argv: list[str] | None = None) -> None:
         "setup": wizard.cmd_setup, "login": core.cmd_login, "status": wizard.cmd_status, "doctor": wizard.cmd_doctor,
         "connect": wizard.cmd_connect, "courses": core.cmd_courses, "scrape": core.cmd_scrape, "sync": core.cmd_sync,
         "recordings": recordings.cmd_recordings,
-        "auto": core.cmd_auto,
+        "auto": core.cmd_auto, "keepalive": core.cmd_keepalive,
         "schedule": lambda a: print({"install": lambda: schedule.install(a.hour), "remove": schedule.remove,
                                      "status": schedule.status}[a.action]()),
     }

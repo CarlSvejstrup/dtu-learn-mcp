@@ -15,6 +15,7 @@ PROFILE = HOME / ".profile"          # browser profile (keeps the Microsoft SSO 
 STATE = HOME / "state.json"          # D2L session cookies, mode 600
 OUT = Path(os.environ.get("DTU_LEARN_OUT") or HOME / "out").expanduser()
 SYNC_CONFIG = HOME / "sync.json"
+NOTIFY_CONFIG = HOME / "notify.json"  # optional {"ntfy_topic": "..."}: phone push for warnings
 AFTER_REFRESH = HOME / "hooks" / "after-refresh"  # optional executable, run by `dtu-learn auto`
 LAST_AUTO = HOME / ".last_auto"
 AUTO_LOG = HOME / "auto.log"

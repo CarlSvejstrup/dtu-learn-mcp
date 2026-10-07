@@ -57,7 +57,8 @@ def test_linux_install_replaces_old_line(dl, exe, crontab):
 
 def test_linux_install_without_existing_crontab(dl, exe, crontab):
     schedule.install()
-    assert len(crontab.lines) == 1 and crontab.lines[0].startswith("30 7-22 * * * ")
+    assert len(crontab.lines) == 2 and crontab.lines[0].startswith("30 7-22 * * * ")
+    assert crontab.lines[1].startswith("0 * * * * ") and crontab.lines[1].endswith(schedule.KEEP_CRON_MARK)
 
 
 def test_linux_remove(dl, exe, crontab):
@@ -95,7 +96,10 @@ def test_darwin_install_writes_plist(dl, exe, launchd):
     assert str(plist) in msg
     assert not legacy.exists()
     assert ["launchctl", "unload", str(legacy)] in launchd
-    assert launchd[-1] == ["launchctl", "load", str(plist)]
+    keep = schedule.PLIST_DIR / f"{schedule.KEEP_LABEL}.plist"
+    assert ["launchctl", "load", str(plist)] in launchd and launchd[-1] == ["launchctl", "load", str(keep)]
+    k = plistlib.loads(keep.read_bytes())
+    assert k["ProgramArguments"] == ["/opt/bin/dtu-learn", "keepalive"] and k["StartInterval"] == 3600
     data = plistlib.loads(plist.read_bytes())
     assert data["Label"] == schedule.LABEL
     assert data["ProgramArguments"] == paths.self_command() + ["auto"] == ["/opt/bin/dtu-learn", "auto"]
@@ -116,6 +120,7 @@ def test_darwin_remove(dl, exe, launchd):
     schedule.install()
     plist = schedule.PLIST_DIR / f"{schedule.LABEL}.plist"
     assert plist.exists()
+    keep = schedule.PLIST_DIR / f"{schedule.KEEP_LABEL}.plist"
     schedule.remove()
-    assert not plist.exists()
-    assert launchd[-1] == ["launchctl", "unload", str(plist)]
+    assert not plist.exists() and not keep.exists()
+    assert ["launchctl", "unload", str(plist)] in launchd and launchd[-1] == ["launchctl", "unload", str(keep)]

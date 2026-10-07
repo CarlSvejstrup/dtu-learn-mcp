@@ -117,3 +117,25 @@ def test_notify_once_throttles(tmp_path, monkeypatch):
     core.notify_once("login", "DTU Learn", "Login expired")
     core.notify_once("login", "DTU Learn", "Login expired")
     assert sent == ["Login expired"]
+
+
+def test_warn_login_alerts_everywhere_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "HOME", tmp_path)
+    calls = []
+    monkeypatch.setattr(core, "notify", lambda t, x: calls.append("banner"))
+    monkeypatch.setattr(core, "push", lambda t, x: calls.append("push"))
+    monkeypatch.setattr(core, "login_dialog", lambda x: calls.append("dialog"))
+    core.warn_login()
+    core.warn_login()
+    assert calls == ["banner", "push", "dialog"]
+
+
+def test_push_needs_a_topic(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(core.httpx, "post", lambda url, **kw: sent.append(url))
+    monkeypatch.setattr(core, "NOTIFY_CONFIG", tmp_path / "notify.json")
+    core.push("t", "x")
+    assert sent == []
+    (tmp_path / "notify.json").write_text('{"ntfy_topic": "abc"}')
+    core.push("t", "x")
+    assert sent == ["https://ntfy.sh/abc"]

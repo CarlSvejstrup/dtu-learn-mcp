@@ -13,3 +13,7 @@ STATUS.md
 .refresh.lock
 auto.log.1
 hooks/
+notify.json
+.notified_*
+.keepalive.json
+.last_items.json

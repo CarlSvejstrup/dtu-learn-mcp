@@ -10,6 +10,7 @@ import platform
 import html
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,8 @@ import httpx
 from playwright.sync_api import BrowserContext, sync_playwright
 
 from . import recordings, textcache, vault
-from .paths import AFTER_REFRESH, AUTO_LOG, HOME, LAST_AUTO, LOCK, OUT, PROFILE, STATE, STATUS, SYNC_CONFIG, child_env, ensure_home
+from .paths import (AFTER_REFRESH, AUTO_LOG, HOME, LAST_AUTO, LOCK, NOTIFY_CONFIG, OUT, PROFILE, STATE, STATUS,
+                    SYNC_CONFIG, child_env, ensure_home, self_command)
 
 BASE = "https://learn.inside.dtu.dk"
 COURSE_OFFERING = 3
@@ -89,14 +91,16 @@ def clear_stale_profile_lock() -> bool:
     return True
 
 
-def open_context(pw, headless: bool) -> BrowserContext:
+def open_context(pw, headless: bool, extensions: bool = False) -> BrowserContext:
+    """extensions=True keeps the profile's extensions (e.g. a password manager) in the visible login window."""
     ensure_home()
     clear_stale_profile_lock()
     errors = []
     for channel in BROWSER_CHANNELS:
         try:
             ctx = pw.chromium.launch_persistent_context(
-                str(PROFILE), channel=channel, headless=headless, accept_downloads=True)
+                str(PROFILE), channel=channel, headless=headless, accept_downloads=True,
+                ignore_default_args=["--disable-extensions"] if extensions else None)
             break
         except Exception as e:  # noqa: BLE001 - try the next browser
             errors.append(f"{channel or 'chromium'}: {str(e).splitlines()[0]}")
@@ -112,9 +116,13 @@ def open_context(pw, headless: bool) -> BrowserContext:
     return ctx
 
 
-def save_state(ctx: BrowserContext) -> None:
+def save_state(ctx: BrowserContext, new_login: bool = False) -> None:
     ctx.storage_state(path=str(STATE))
     STATE.chmod(0o600)
+    k = json.loads(KEEPALIVE.read_text()) if KEEPALIVE.exists() else {}
+    if new_login or k.get("dead_at") or not k:  # the session's lifetime starts now
+        now = datetime.now().isoformat(timespec="seconds")
+        KEEPALIVE.write_text(json.dumps({"alive_since": now, "last_ok": now}))
 
 
 def logged_in(ctx: BrowserContext) -> bool:
@@ -153,6 +161,61 @@ def session_client() -> httpx.Client:
                         timeout=httpx.Timeout(30, read=120), limits=limits)
 
 
+KEEPALIVE = HOME / ".keepalive.json"  # when the saved session was last seen alive, and since when
+
+
+def keepalive() -> bool | None:
+    """Touch DTU Learn with the saved cookies so its session does not time out between daily refreshes.
+    A plain HTTP call, no browser, so it also works while the Mac is in DarkWake. True = alive, False = expired,
+    None = not checked (no session, no network, a refresh is running, or already known dead since the last login)."""
+    if not STATE.exists():
+        return None
+    k = json.loads(KEEPALIVE.read_text()) if KEEPALIVE.exists() else {}
+    if k.get("dead_at") and STATE.stat().st_mtime < datetime.fromisoformat(k["dead_at"]).timestamp():
+        return None  # expired and nobody has logged in since: pinging again cannot help
+    try:
+        lock = _take_lock()
+    except RefreshLocked:
+        return None  # the running refresh keeps the session alive itself
+    now = datetime.now()
+    try:
+        state = json.loads(STATE.read_text())
+        jar = httpx.Cookies()
+        for c in state["cookies"]:
+            jar.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
+        try:
+            r = httpx.get(f"{BASE}/d2l/api/lp/1.0/users/whoami", cookies=jar, headers={"User-Agent": UA},
+                          follow_redirects=False, timeout=30)
+        except httpx.HTTPError:
+            log(f"{now:%Y-%m-%d %H:%M} keepalive: no network, tried again later")
+            return None
+        alive = r.status_code == 200
+        if alive and r.cookies:  # keep any cookie D2L renews
+            fresh = {c.name: c.value for c in r.cookies.jar}
+            for c in state["cookies"]:
+                if c["domain"].endswith("learn.inside.dtu.dk") and c["name"] in fresh:
+                    c["value"] = fresh[c["name"]]
+            STATE.write_text(json.dumps(state))
+            STATE.chmod(0o600)
+        if alive:
+            since = k.get("alive_since") if not k.get("dead_at") else None
+            k = {"alive_since": since or now.isoformat(timespec="seconds"), "last_ok": now.isoformat(timespec="seconds")}
+            log(f"{now:%Y-%m-%d %H:%M} keepalive: session alive (since {k['alive_since'][5:16].replace('T', ' ')})")
+        else:
+            k = {**k, "dead_at": now.isoformat(timespec="seconds")}
+            warn_login()
+            log(f"{now:%Y-%m-%d %H:%M} keepalive: session expired (HTTP {r.status_code}; last alive "
+                f"{(k.get('last_ok') or '?')[5:16].replace('T', ' ')}, alive since {(k.get('alive_since') or '?')[5:16].replace('T', ' ')})")
+        KEEPALIVE.write_text(json.dumps(k))
+        return alive
+    finally:
+        lock.close()
+
+
+def cmd_keepalive(args) -> None:
+    keepalive()
+
+
 def whoami() -> dict | None:
     """Current user if the saved session works (renews it silently when possible), else None."""
     try:
@@ -174,7 +237,7 @@ def whoami() -> dict | None:
 def login(timeout_s: int = 300) -> dict:
     """Open a browser window, wait for the user to finish DTU login + MFA, save the session."""
     with sync_playwright() as pw:
-        ctx = open_context(pw, headless=False)
+        ctx = open_context(pw, headless=False, extensions=True)
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto(f"{BASE}/d2l/login")
@@ -187,7 +250,7 @@ def login(timeout_s: int = 300) -> dict:
                                      "Run: dtu-learn login") from e
             if not logged_in(ctx):
                 raise SessionExpired("Reached DTU Learn, but the API rejected the session. Try: dtu-learn login")
-            save_state(ctx)
+            save_state(ctx, new_login=True)
             return ctx.request.get(f"{BASE}/d2l/api/lp/1.0/users/whoami").json()
         finally:
             ctx.close()
@@ -195,6 +258,7 @@ def login(timeout_s: int = 300) -> dict:
 
 def cmd_login(args) -> None:
     me = login(getattr(args, "timeout", 300))
+    (HOME / ".notified_login").unlink(missing_ok=True)  # the next expiry warns at once
     print(f"Logged in as {me.get('FirstName')} {me.get('LastName')} ({me.get('UniqueName')}). Session saved.")
 
 
@@ -797,16 +861,66 @@ def mac_dark_wake() -> bool:
     return bool(caps) and "Graphics" not in caps
 
 
-def notify_once(kind: str, title: str, text: str) -> None:
-    """Hourly checks must not repeat the same warning every hour."""
+def push(title: str, text: str) -> None:
+    """Phone push through ntfy (https://ntfy.sh) when notify.json names a topic. Best effort."""
+    try:
+        cfg = json.loads(NOTIFY_CONFIG.read_text())
+        topic = cfg.get("ntfy_topic")
+        if topic:
+            httpx.post(f"{cfg.get('ntfy_server', 'https://ntfy.sh')}/{topic}", content=text.encode(),
+                       headers={"Title": title, "Priority": "high", "Tags": "warning"}, timeout=15)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+LOGIN_DIALOG_MARK = "dtu-learn-login-dialog"
+
+
+def login_dialog(text: str) -> None:
+    """macOS dialog that stays on screen until answered; "Log in now" opens the DTU login.
+    Started detached so the scheduled job does not wait for it, and never two at once."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        if subprocess.run(["pgrep", "-f", LOGIN_DIALOG_MARK], capture_output=True).returncode == 0:
+            return
+        cmd = f"{shlex.join(self_command() + ['login'])} >> {shlex.quote(str(AUTO_LOG))} 2>&1 &"
+        script = (f"-- {LOGIN_DIALOG_MARK}\n"
+                  f"set r to button returned of (display dialog {json.dumps(text, ensure_ascii=False)} with title \"DTU Learn\" "
+                  "buttons {\"Later\", \"Log in now\"} default button \"Log in now\" with icon caution giving up after 21600)\n"
+                  f"if r is \"Log in now\" then do shell script {json.dumps(cmd, ensure_ascii=False)}")
+        subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _throttled(kind: str) -> bool:
+    """Hourly checks must not repeat the same warning every hour. True = warned recently, stay quiet."""
     stamp = HOME / f".notified_{kind}"
     try:
         if stamp.exists() and datetime.now() - datetime.fromisoformat(stamp.read_text().strip()) < NOTIFY_EVERY:
-            return
+            return True
         stamp.write_text(datetime.now().isoformat(timespec="seconds"))
     except (OSError, ValueError):
         pass
-    notify(title, text)
+    return False
+
+
+def notify_once(kind: str, title: str, text: str) -> None:
+    if not _throttled(kind):
+        notify(title, text)
+        push(title, text)
+
+
+def warn_login() -> None:
+    """Login expired: banner, phone push and a dialog that waits for an answer."""
+    if _throttled("login"):
+        return
+    text = "Your DTU Learn login has expired. Nothing new is fetched until you log in again."
+    notify("DTU Learn", text)
+    push("DTU Learn: login expired", text + " Run: dtu-learn login")
+    login_dialog(text)
 
 
 def write_status(result: str, detail: str = "", items: list[str] | None = None) -> None:
@@ -907,7 +1021,7 @@ def cmd_auto(args) -> None:
         write_status("skipped", str(e))
         return
     except SessionExpired as e:
-        notify_once("login", "DTU Learn", "Login expired. Run: dtu-learn login (or ask your AI assistant to log you in)")
+        warn_login()
         log(f"session error: {e}")
         write_status("login expired", "no refresh until you log in; queued lectures still run")
         _run_hook()
